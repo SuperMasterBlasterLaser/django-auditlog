@@ -116,7 +116,7 @@ class LogEntryManager(models.Manager):
             if callable(get_additional_data):
                 kwargs.setdefault("additional_data", get_additional_data())
 
-            objects = [smart_str(instance) for instance in changed_queryset]
+            objects = [instance.pk for instance in changed_queryset]
             kwargs["changes"] = {
                 field_name: {
                     "type": "m2m",
