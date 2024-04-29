@@ -23,6 +23,7 @@ from django.urls import resolve, reverse
 from django.utils import dateformat, formats
 from django.utils import timezone as django_timezone
 from django.utils.encoding import smart_str
+from django.utils.translation import gettext_lazy as _
 
 from auditlog.admin import LogEntryAdmin
 from auditlog.cid import get_cid
@@ -512,6 +513,20 @@ class MiddlewareTest(TestCase):
             self.middleware(request)
 
         self.assert_no_listeners()
+
+    def test_init_middleware(self):
+        with override_settings(AUDITLOG_DISABLE_REMOTE_ADDR="str"):
+            with self.assertRaisesMessage(
+                TypeError, "Setting 'AUDITLOG_DISABLE_REMOTE_ADDR' must be a boolean"
+            ):
+                AuditlogMiddleware()
+
+    def test_disable_remote_addr(self):
+        with override_settings(AUDITLOG_DISABLE_REMOTE_ADDR=True):
+            headers = {"HTTP_X_FORWARDED_FOR": "127.0.0.2"}
+            request = self.factory.get("/", **headers)
+            remote_addr = self.middleware._get_remote_addr(request)
+            self.assertIsNone(remote_addr)
 
     def test_get_remote_addr(self):
         tests = [  # (headers, expected_remote_addr)
@@ -1097,6 +1112,21 @@ class UnregisterTest(TestCase):
         # Check for log entries
         self.assertEqual(LogEntry.objects.count(), 0, msg="There are no log entries")
 
+    def test_manual_logging(self):
+        obj = self.obj
+        obj.boolean = True
+        obj.save()
+        LogEntry.objects.log_create(
+            instance=obj,
+            action=LogEntry.Action.UPDATE,
+            changes="",
+        )
+        self.assertEqual(
+            obj.history.filter(action=LogEntry.Action.UPDATE).count(),
+            1,
+            msg="There is one log entry for 'UPDATE'",
+        )
+
 
 class RegisterModelSettingsTest(TestCase):
     def setUp(self):
@@ -1626,6 +1656,15 @@ class DiffMsgTest(TestCase):
                 "</table>"
             ),
         )
+
+    def test_instance_translation_and_history_logging(self):
+        first = SimpleModel()
+        second = SimpleModel(text=_("test"))
+        changes = model_instance_diff(first, second)
+        self.assertEqual(changes, {"text": ("", "test")})
+        second.save()
+        log_one = second.history.last()
+        self.assertTrue(isinstance(log_one, LogEntry))
 
     def test_changes_msg_create(self):
         log_entry = self._create_log_entry(
